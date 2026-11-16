@@ -3,6 +3,7 @@ import { createServer } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -20,6 +21,7 @@ const missingConfig = Object.entries(databaseConfig)
   .filter(([, value]) => value === undefined)
   .map(([key]) => `DB_TEST_${key.toUpperCase()}`);
 const enabled = missingConfig.length === 0;
+const integrationJwtSecret = 'integration-test-secret-not-for-deployment-32-bytes-minimum';
 
 if (enabled) {
   if (!databaseConfig.name?.toLowerCase().endsWith('_test')) {
@@ -33,11 +35,14 @@ if (enabled) {
   process.env.DB_USER = databaseConfig.user;
   process.env.DB_PASSWORD = databaseConfig.password;
   process.env.DB_NAME = databaseConfig.name;
+  process.env.JWT_SECRET = integrationJwtSecret;
 }
 
-const userIds = [1, 2] as const;
-const alice = { Authorization: 'Bearer 1' };
-const bob = { Authorization: 'Bearer 2' };
+const aliceEmail = 'integration-alice@special-project.invalid';
+const bobEmail = 'integration-bob@special-project.invalid';
+const integrationPassword = 'Integration password 123!';
+let aliceToken: string | undefined;
+let bobToken: string | undefined;
 let activityId: number | undefined;
 let defaultCardId: number | undefined;
 let fixtureCreated = false;
@@ -45,6 +50,20 @@ let apiProcess: ChildProcess | undefined;
 let apiUrl: string;
 let closeDatabasePool: typeof import('./pool.js').closeDatabasePool;
 let getDatabasePool: typeof import('./pool.js').getDatabasePool;
+
+function aliceAuth(): { Authorization: string } {
+  if (!aliceToken) {
+    throw new Error('Alice integration account has not logged in.');
+  }
+  return { Authorization: `Bearer ${aliceToken}` };
+}
+
+function bobAuth(): { Authorization: string } {
+  if (!bobToken) {
+    throw new Error('Bob integration account has not logged in.');
+  }
+  return { Authorization: `Bearer ${bobToken}` };
+}
 
 async function unusedPort(): Promise<number> {
   const server = createServer();
@@ -63,6 +82,9 @@ async function unusedPort(): Promise<number> {
 }
 
 async function startApi(): Promise<void> {
+  if (apiProcess && apiProcess.exitCode === null && apiProcess.signalCode === null) {
+    return;
+  }
   const port = await unusedPort();
   apiUrl = `http://127.0.0.1:${port}`;
   let output = '';
@@ -124,7 +146,7 @@ function requireFixtureIds(): { activityId: number; defaultCardId: number } {
   return { activityId, defaultCardId };
 }
 
-describe.skipIf(!enabled)('MySQL feature route integration', () => {
+describe.skipIf(!enabled)('MySQL auth and feature route integration', () => {
   beforeAll(async () => {
     const poolModule = await import('./pool.js');
     closeDatabasePool = poolModule.closeDatabasePool;
@@ -145,12 +167,6 @@ describe.skipIf(!enabled)('MySQL feature route integration', () => {
     if (Number(userCount) !== 0) {
       throw new Error('The dedicated MySQL test database must not contain users.');
     }
-
-    await getDatabasePool().execute(
-      `INSERT INTO users (id, name, email, password_hash, role)
-       VALUES (1, 'Integration Alice', 'integration-alice@special-project.invalid', NULL, 'caregiver'),
-              (2, 'Integration Bob', 'integration-bob@special-project.invalid', NULL, 'caregiver')`,
-    );
     fixtureCreated = true;
 
     const [activityResult] = await getDatabasePool().execute<ResultSetHeader>(
@@ -168,7 +184,7 @@ describe.skipIf(!enabled)('MySQL feature route integration', () => {
   afterAll(async () => {
     await stopApi();
     if (fixtureCreated) {
-      await getDatabasePool().execute('DELETE FROM users WHERE id IN (?, ?)', [...userIds]);
+      await getDatabasePool().execute('DELETE FROM users WHERE email IN (?, ?)', [aliceEmail, bobEmail]);
       if (activityId !== undefined) {
         await getDatabasePool().execute('DELETE FROM activities WHERE id = ?', [activityId]);
       }
@@ -182,76 +198,177 @@ describe.skipIf(!enabled)('MySQL feature route integration', () => {
     await closeDatabasePool();
   });
 
+  it('registers and logs in users, returns the current user, and rejects invalid or expired JWTs', async () => {
+    await startApi();
+    const aliceRegistration = await request(apiUrl).post('/api/auth/register').send({
+      name: 'Integration Alice',
+      email: 'Integration-Alice@special-project.invalid',
+      password: integrationPassword,
+      role: 'caregiver',
+    });
+    expect(aliceRegistration.status).toBe(201);
+    expect(aliceRegistration.body.user).toEqual({
+      id: expect.any(Number),
+      name: 'Integration Alice',
+      email: aliceEmail,
+      role: 'caregiver',
+    });
+    expect(aliceRegistration.body.token).toEqual(expect.any(String));
+    expect(aliceRegistration.body).not.toHaveProperty('password');
+    expect(aliceRegistration.body).not.toHaveProperty('password_hash');
+
+    const [passwordRows] = await getDatabasePool().execute<Array<RowDataPacket & {
+      password_hash: string | null;
+    }>>('SELECT password_hash FROM users WHERE email = ?', [aliceEmail]);
+    expect(passwordRows[0]?.password_hash).toMatch(/^\$2[aby]\$/);
+
+    const weakPassword = await request(apiUrl).post('/api/auth/register').send({
+      name: 'Weak Password',
+      email: 'weak-password@special-project.invalid',
+      password: 'short',
+      role: 'caregiver',
+    });
+    expect(weakPassword.status).toBe(400);
+
+    const duplicateEmail = await request(apiUrl).post('/api/auth/register').send({
+      name: 'Duplicate User',
+      email: aliceEmail,
+      password: integrationPassword,
+      role: 'caregiver',
+    });
+    expect(duplicateEmail.status).toBe(409);
+
+    const invalidLogin = await request(apiUrl).post('/api/auth/login').send({
+      email: aliceEmail,
+      password: 'incorrect password',
+    });
+    expect(invalidLogin.status).toBe(401);
+    expect(invalidLogin.body).toEqual({ error: 'Invalid email or password' });
+
+    const aliceLogin = await request(apiUrl).post('/api/auth/login').send({
+      email: aliceEmail,
+      password: integrationPassword,
+    });
+    expect(aliceLogin.status).toBe(200);
+    aliceToken = aliceLogin.body.token as string;
+    const currentUser = await request(apiUrl).get('/api/auth/me').set(aliceAuth());
+    expect(currentUser.status).toBe(200);
+    expect(currentUser.body).toEqual(aliceRegistration.body.user);
+
+    const bobRegistration = await request(apiUrl).post('/api/auth/register').send({
+      name: 'Integration Bob',
+      email: bobEmail,
+      password: integrationPassword,
+      role: 'ot',
+    });
+    expect(bobRegistration.status).toBe(201);
+    const bobLogin = await request(apiUrl).post('/api/auth/login').send({
+      email: bobEmail,
+      password: integrationPassword,
+    });
+    expect(bobLogin.status).toBe(200);
+    bobToken = bobLogin.body.token as string;
+
+    const expiredToken = jwt.sign(
+      {
+        name: 'Integration Alice',
+        email: aliceEmail,
+        role: 'caregiver',
+      },
+      integrationJwtSecret,
+      {
+        algorithm: 'HS256',
+        audience: 'special-project-client',
+        expiresIn: -1,
+        issuer: 'special-project-api',
+        subject: String(aliceRegistration.body.user.id),
+      },
+    );
+    for (const authorization of [
+      undefined,
+      'Bearer forged.token.value',
+      `Bearer ${expiredToken}`,
+    ]) {
+      const req = request(apiUrl).get('/api/auth/me');
+      if (authorization) {
+        req.set('Authorization', authorization);
+      }
+      const response = await req;
+      expect(response.status).toBe(401);
+      expect(response.body.error).toEqual(expect.any(String));
+    }
+  });
+
   it('persists API records across a server restart and enforces ownership and cascades', async () => {
     await startApi();
     const fixtures = requireFixtureIds();
-    const aliceChild = await request(apiUrl).post('/api/children').set(alice).send({
+    const aliceChild = await request(apiUrl).post('/api/children').set(aliceAuth()).send({
       name: 'Persistent Alice Child',
       age: 6,
       delay_domain: 'speech',
     });
-    const bobChild = await request(apiUrl).post('/api/children').set(bob).send({
+    const bobChild = await request(apiUrl).post('/api/children').set(bobAuth()).send({
       name: 'Persistent Bob Child',
       age: 7,
       delay_domain: 'motor',
     });
     expect(aliceChild.status).toBe(201);
     expect(bobChild.status).toBe(201);
-    const aliceChildren = await request(apiUrl).get('/api/children').set(alice);
-    const bobChildren = await request(apiUrl).get('/api/children').set(bob);
+    const aliceChildren = await request(apiUrl).get('/api/children').set(aliceAuth());
+    const bobChildren = await request(apiUrl).get('/api/children').set(bobAuth());
     expect(aliceChildren.body.map((child: { id: number }) => child.id)).toContain(aliceChild.body.id);
     expect(bobChildren.body.map((child: { id: number }) => child.id)).toEqual([bobChild.body.id]);
-    expect((await request(apiUrl).get(`/api/children/${aliceChild.body.id}`).set(bob)).status).toBe(404);
-    expect((await request(apiUrl).put(`/api/children/${aliceChild.body.id}`).set(bob).send({ name: 'Not owned' })).status).toBe(404);
-    expect((await request(apiUrl).delete(`/api/children/${aliceChild.body.id}`).set(bob)).status).toBe(404);
+    expect((await request(apiUrl).get(`/api/children/${aliceChild.body.id}`).set(bobAuth())).status).toBe(404);
+    expect((await request(apiUrl).put(`/api/children/${aliceChild.body.id}`).set(bobAuth()).send({ name: 'Not owned' })).status).toBe(404);
+    expect((await request(apiUrl).delete(`/api/children/${aliceChild.body.id}`).set(bobAuth())).status).toBe(404);
 
-    const activities = await request(apiUrl).get('/api/activities').set(alice);
+    const activities = await request(apiUrl).get('/api/activities').set(aliceAuth());
     expect(activities.status).toBe(200);
     expect(activities.body.some((activity: { id: number }) => activity.id === fixtures.activityId)).toBe(true);
 
     const date = '2099-12-30';
-    const schedule = await request(apiUrl).post('/api/schedules').set(alice).send({
+    const schedule = await request(apiUrl).post('/api/schedules').set(aliceAuth()).send({
       childId: aliceChild.body.id,
       date,
     });
     expect(schedule.status).toBe(201);
-    const bobSchedule = await request(apiUrl).post('/api/schedules').set(bob).send({
+    const bobSchedule = await request(apiUrl).post('/api/schedules').set(bobAuth()).send({
       childId: bobChild.body.id,
       date,
     });
     expect(bobSchedule.status).toBe(201);
-    const bobTask = await request(apiUrl).post('/api/tasks').set(bob).send({
+    const bobTask = await request(apiUrl).post('/api/tasks').set(bobAuth()).send({
       scheduleId: bobSchedule.body.id,
       activityId: fixtures.activityId,
     });
     expect(bobTask.status).toBe(201);
-    expect((await request(apiUrl).get('/api/schedules').set(bob).query({
+    expect((await request(apiUrl).get('/api/schedules').set(bobAuth()).query({
       childId: aliceChild.body.id,
       date,
     })).status).toBe(404);
-    expect((await request(apiUrl).post('/api/tasks').set(bob).send({
+    expect((await request(apiUrl).post('/api/tasks').set(bobAuth()).send({
       scheduleId: schedule.body.id,
       activityId: fixtures.activityId,
     })).status).toBe(404);
-    const task = await request(apiUrl).post('/api/tasks').set(alice).send({
+    const task = await request(apiUrl).post('/api/tasks').set(aliceAuth()).send({
       scheduleId: schedule.body.id,
       activityId: fixtures.activityId,
     });
     expect(task.status).toBe(201);
-    const secondTask = await request(apiUrl).post('/api/tasks').set(alice).send({
+    const secondTask = await request(apiUrl).post('/api/tasks').set(aliceAuth()).send({
       scheduleId: schedule.body.id,
       name: 'Integration custom task',
       icon: '⭐',
     });
     expect(secondTask.status).toBe(201);
-    expect((await request(apiUrl).put(`/api/tasks/${secondTask.body.id}`).set(alice).send({
+    expect((await request(apiUrl).put(`/api/tasks/${secondTask.body.id}`).set(aliceAuth()).send({
       position: 1,
       start_time: '08:15',
       duration_min: 10,
     })).status).toBe(200);
     const completed = await request(apiUrl)
       .patch(`/api/tasks/${task.body.id}/complete`)
-      .set(alice)
+      .set(aliceAuth())
       .send({ done: true });
     expect(completed.body.status).toBe('done');
     expect(completed.body.completed_at).toBeTruthy();
@@ -269,8 +386,8 @@ describe.skipIf(!enabled)('MySQL feature route integration', () => {
 
     await stopApi();
     await startApi();
-    const persistedChild = await request(apiUrl).get(`/api/children/${aliceChild.body.id}`).set(alice);
-    const persistedSchedule = await request(apiUrl).get('/api/schedules').set(alice).query({
+    const persistedChild = await request(apiUrl).get(`/api/children/${aliceChild.body.id}`).set(aliceAuth());
+    const persistedSchedule = await request(apiUrl).get('/api/schedules').set(aliceAuth()).query({
       childId: aliceChild.body.id,
       date,
     });
@@ -280,9 +397,9 @@ describe.skipIf(!enabled)('MySQL feature route integration', () => {
       { id: secondTask.body.id, position: 1, start_time: '08:15', duration_min: 10, status: 'pending' },
       { id: task.body.id, position: 2, status: 'done', completed_at: completed.body.completed_at },
     ]);
-    expect((await request(apiUrl).put(`/api/tasks/${task.body.id}`).set(bob).send({ duration_min: 5 })).status).toBe(404);
+    expect((await request(apiUrl).put(`/api/tasks/${task.body.id}`).set(bobAuth()).send({ duration_min: 5 })).status).toBe(404);
 
-    expect((await request(apiUrl).delete(`/api/children/${aliceChild.body.id}`).set(alice)).status).toBe(200);
+    expect((await request(apiUrl).delete(`/api/children/${aliceChild.body.id}`).set(aliceAuth())).status).toBe(200);
     const [cascadedRows] = await getDatabasePool().query<Array<RowDataPacket & {
       schedules: number;
       tasks: number;
@@ -301,7 +418,7 @@ describe.skipIf(!enabled)('MySQL feature route integration', () => {
     expect(Number(cascade.schedules)).toBe(0);
     expect(Number(cascade.tasks)).toBe(0);
     expect(Number(cascade.custom_cards)).toBe(0);
-    expect((await request(apiUrl).get('/api/schedules').set(bob).query({
+    expect((await request(apiUrl).get('/api/schedules').set(bobAuth()).query({
       childId: bobChild.body.id,
       date,
     })).status).toBe(200);
@@ -347,7 +464,7 @@ describe.skipIf(!enabled)('MySQL feature route integration', () => {
 });
 
 if (!enabled) {
-  describe('MySQL feature route integration', () => {
+  describe('MySQL auth and feature route integration', () => {
     it.skip(`requires ${missingConfig.join(', ')}`, () => {});
   });
 }

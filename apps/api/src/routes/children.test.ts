@@ -2,9 +2,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../app.js';
 import { findScheduleByChildAndDate, resetStore, tasksForSchedule } from '../mocks/data.js';
-
-const alice = { Authorization: 'Bearer 1' };
-const bob = { Authorization: 'Bearer 2' };
+import { alice, bob } from '../test-utils/auth.js';
 const profile = { name: 'Sam', age: 5, delay_domain: 'speech', avatar: '🐼' };
 
 beforeEach(() => resetStore());

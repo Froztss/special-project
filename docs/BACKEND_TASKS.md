@@ -10,7 +10,7 @@ Groups run in dependency order: **1 → 2 → 3 → 4 → 5**. Tasks within a gr
 | --- | --- | --- |
 | Database driver | `mysql2` (promise pool, parameterized queries only) | NFR-SEC-02 |
 | Validation | `zod`, schemas shared via `packages/shared` | FR-AUTH-02, NFR-SEC-03 |
-| Password hashing | `bcrypt` | FR-AUTH-03, NFR-SEC-01 |
+| Password hashing | `bcryptjs` (bcrypt algorithm; no native build dependency) | FR-AUTH-03, NFR-SEC-01 |
 | Sessions | `jsonwebtoken`, secret in env, 8 h expiry | FR-AUTH-04, NFR-SEC-01 |
 | API tests | `vitest` + `supertest` | §9.2, NFR-SEC-06 |
 | Config | `dotenv`, `.env.example` kept current, `.env` git-ignored | NFR-SEC-05 |
@@ -29,18 +29,18 @@ Groups run in dependency order: **1 → 2 → 3 → 4 → 5**. Tasks within a gr
 
 ## Group 2 — Authentication & account (AUTH)
 
-- [ ] **2.1 User data access** — parameterized queries: insert user, find by email, find by id; `password_hash` never leaves the data layer. (§7.3, NFR-SEC-02)
-- [ ] **2.2 Register endpoint** — `POST /api/auth/register`: zod validation (required name, valid email, password ≥ 8, role in `caregiver`/`ot`/`sped_teacher`); bcrypt hash; 409 on duplicate email. (FR-AUTH-01/02/03)
-- [ ] **2.3 Login endpoint** — `POST /api/auth/login`: verify credentials, return JWT signed with `JWT_SECRET`, 8 h expiry; generic 401 on bad credentials. (FR-AUTH-04, NFR-SEC-01)
-- [ ] **2.4 Auth middleware** — `requireAuth`: verify Bearer token, 401 on missing/invalid/expired, attach user to request; applied to every non-public route. (FR-AUTH-05/07)
-- [ ] **2.5 Current-user endpoint** — `GET /api/auth/me`: id, name, email, role only. (FR-AUTH-05)
-- [ ] **2.6 Auth tests** — register/login/me happy path; weak input and duplicate email rejected; protected routes reject missing/expired tokens. (§9.2)
+- [x] **2.1 User data access** — parameterized queries: insert user, find by email, find by id; `password_hash` never leaves the data layer. (§7.3, NFR-SEC-02)
+- [x] **2.2 Register endpoint** — `POST /api/auth/register`: zod validation (required name, valid email, password ≥ 8, role in `caregiver`/`ot`/`sped_teacher`); bcrypt hash; 409 on duplicate email. (FR-AUTH-01/02/03)
+- [x] **2.3 Login endpoint** — `POST /api/auth/login`: verify credentials, return JWT signed with `JWT_SECRET`, 8 h expiry; generic 401 on bad credentials. (FR-AUTH-04, NFR-SEC-01)
+- [x] **2.4 Auth middleware** — `requireAuth`: verify Bearer token, 401 on missing/invalid/expired, attach user to request; applied to every non-public route. (FR-AUTH-05/07)
+- [x] **2.5 Current-user endpoint** — `GET /api/auth/me`: id, name, email, role only. (FR-AUTH-05)
+- [x] **2.6 Auth tests** — register/login/me happy path; weak input and duplicate email rejected; protected routes reject missing/expired tokens. (§9.2)
 
 **Group exit criteria:** register → login → me works end to end; all non-public routes require a valid token; logout needs no server state (client clears token, FR-AUTH-06).
 
 ## Group 3 — Child profiles & activity library (CHILD)
 
-> **Status note:** Child, activity, schedule and task routes use parameterized MySQL access. Child deletion relies on the schema's schedule/task/custom-card foreign-key cascades, and ownership checks follow child ownership. The temporary Bearer-ID authentication fixtures remain until Group 2 delivers JWT auth. Vitest uses the mock store only when no database is configured; the dedicated MySQL integration test passed against a separate empty test database, including restart persistence, user isolation and cascades.
+> **Status note:** Child, activity, schedule and task routes use parameterized MySQL access and verified JWT identities. Child deletion relies on the schema's schedule/task/custom-card foreign-key cascades, and ownership checks follow child ownership. Vitest uses signed test tokens and the mock store only when no database is configured; the dedicated MySQL integration test verifies registration, login, token rejection, restart persistence, user isolation and cascades.
 
 - [x] **3.1 Child data access** — ownership-scoped parameterized SQL: every read/write filters by the authenticated `user_id`. (FR-CHILD-06, §7.3)
 - [x] **3.2 List & create** — `GET /api/children` (own only); `POST /api/children` with name, age, delay_domain, optional notes, predefined avatar. (FR-CHILD-01/02/05)
@@ -53,7 +53,7 @@ Groups run in dependency order: **1 → 2 → 3 → 4 → 5**. Tasks within a gr
 
 ## Group 4 — Schedules & tasks (SCH + TASK)
 
-> **Status note:** Schedule and task routes use MySQL; Bearer IDs are still development fixtures until Group 2 JWT auth is implemented. The MySQL integration suite creates records through a running API process, restarts that process, checks persisted completion, and verifies child FK cascades; the live integration run passed.
+> **Status note:** Schedule and task routes use MySQL and require verified JWTs. The MySQL integration suite creates records through a running API process, restarts that process, checks persisted completion, and verifies child FK cascades; the live integration run passed.
 
 - [x] **4.1 Schedule read** — `GET /api/schedules?childId=&date=` returning the schedule with tasks ordered by `position`; ownership via the child. (FR-SCH-02, FR-TASK-05)
 - [x] **4.2 Schedule create & copy** — `POST /api/schedules` for child + date (409 on duplicate date); optional `copyFrom` date duplicates that day's tasks. (FR-SCH-02/09)

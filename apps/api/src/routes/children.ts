@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler, HttpError } from '../lib/errors.js';
 import { parse } from '../lib/validate.js';
-import { currentUser, requireAuth } from '../mocks/auth.js';
+import { currentUser, requireAuth } from '../lib/auth.js';
 import {
   createChildForUser,
   deleteChildForUser,

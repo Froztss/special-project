@@ -2,9 +2,7 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../app.js';
 import { resetStore } from '../mocks/data.js';
-
-const alice = { Authorization: 'Bearer 1' };
-const bob = { Authorization: 'Bearer 2' };
+import { alice, bob } from '../test-utils/auth.js';
 const DATE = '2026-11-14';
 
 let scheduleId: number;

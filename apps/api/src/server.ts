@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { app } from './app.js';
 import { checkDatabaseConnection, closeDatabasePool } from './db/pool.js';
+import { validateJwtConfiguration } from './lib/auth.js';
 
 const port = Number(process.env.PORT ?? 3001);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -8,6 +9,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 }
 
 async function startServer(): Promise<void> {
+  validateJwtConfiguration();
   await checkDatabaseConnection();
   console.log('Database connection established.');
 
