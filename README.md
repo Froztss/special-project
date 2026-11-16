@@ -1,6 +1,23 @@
-# Full-stack TypeScript starter
+# Araw · Visual schedules and picture cards
 
 An npm workspace with React + Vite, Express, and a shared types package. Requires Node.js 22.12+ and npm.
+
+## Frontend preview
+
+The responsive frontend follows the [Araw Figma design](https://www.figma.com/design/LIUnykdWEJ139auGBKjTUs/SRS-v2?node-id=26-3). It includes the staff dashboard, child profiles, schedule editor, task status, progress, settings, picture card management, and the child schedule and communication board. Figma SVG assets and Nunito fonts are bundled locally.
+
+Run the frontend alone without MySQL or the API:
+
+```sh
+npm ci
+npm run dev -w @starter/web
+```
+
+Open http://localhost:5173. On PowerShell systems that block `npm.ps1`, use `npm.cmd` instead of `npm`.
+
+This frontend currently uses demo profiles (Mika, Leo and Ari) and stores edits in browser local storage. Login and registration demonstrate the UI only. The backend endpoints described below are separate and are not connected to these screens yet. The communication board uses the browser's speech synthesis when available.
+
+Verify the frontend with `npm run typecheck -w @starter/web` and `npm run build -w @starter/web`.
 
 ```text
 apps/
@@ -62,6 +79,7 @@ The seed-only demo caregiver has no login password; create a normal account to u
 - `npm run build`: compile shared schemas and the API, then build the frontend.
 - `npm run db:schema`: create the database tables (the database itself must already exist).
 - `npm run db:seed`: add the activity library, default cards, and demo schedules.
+- `npm test -w @starter/api`: run API tests.
 - `npm start`: run the compiled API after building.
 - `npm run preview -w @starter/web`: preview the frontend build locally (no development API proxy).
 
@@ -69,7 +87,7 @@ The seed-only demo caregiver has no login password; create a normal account to u
 
 ### Child profiles, activities, schedules and tasks
 
-The API persists child, activity, schedule and task data in MySQL. Child, schedule and task queries are scoped to the authenticated user's ID, and deleting a child relies on the schema's foreign-key cascades. The current Bearer IDs (`1` for Alice and `2` for Bob) are temporary development authentication fixtures, not JWTs; replace them with Group 2 authentication before production. API unit tests use the in-memory mock store only when running under Vitest without database configuration. See [the backend plan](docs/BACKEND_TASKS.md).
+The API persists child, activity, schedule and task data in MySQL. Child, schedule and task queries are scoped to the authenticated user's ID, and deleting a child relies on the schema's foreign-key cascades. Requests use the real JWT middleware. API unit tests use the in-memory mock store only when running under Vitest without database configuration. See [the backend plan](docs/BACKEND_TASKS.md).
 
 | Method and path | Response |
 | --- | --- |
@@ -77,10 +95,10 @@ The API persists child, activity, schedule and task data in MySQL. Child, schedu
 | `POST /api/children` | `201`, created child |
 | `GET /api/children/:id` | `200`, owned child |
 | `PUT /api/children/:id` | `200`, updated child; accepts a nonempty partial update |
-| `DELETE /api/children/:id` | `200`, `{ "success": true }`; removes mock schedules and their tasks |
+| `DELETE /api/children/:id` | `200`, `{ "success": true }`; removes the child's schedules and tasks through database cascades |
 | `GET /api/activities` | `200`, array of shared activities with `id`, `name`, `icon`, `category` |
 
-All six endpoints require authentication. Missing/invalid tokens return `401`; invalid input returns `400`; missing or another user's child returns the same `404`. Errors use `{ "error": "message" }`. Ownership comes from authentication; client-supplied ids, ownership and timestamps are rejected in child bodies. Deletion confirmation belongs in the frontend.
+All child and activity endpoints require a valid JWT. Missing/invalid tokens return `401`; invalid input returns `400`; missing or another user's child returns the same `404`. Errors use `{ "error": "message" }`. Ownership comes from authentication; client-supplied ids, ownership and timestamps are rejected in child bodies. Deletion confirmation belongs in the frontend.
 
 Example create body:
 
@@ -93,6 +111,16 @@ The current validation choices are: trimmed name (1–100 characters), integer a
 Run unit tests with `npm run test -w @starter/api`. For MySQL-backed ownership, persistence, activity-library and child-cascade coverage, configure `DB_TEST_HOST`, `DB_TEST_PORT`, `DB_TEST_USER`, `DB_TEST_PASSWORD`, and `DB_TEST_NAME` (a dedicated, empty database whose name ends in `_test`), then run `npm run test:integration -w @starter/api`. The integration test applies the schema without dropping tables and deletes only its own fixtures.
 
 For local integration testing, put those `DB_TEST_*` values in `apps/api/.env.test` (this file is git-ignored). Create the database first; the test account needs privileges only on that database and the database must not contain any users. Do not copy production credentials or seed production data into the test database.
+
+### Cards, settings, and profile
+
+- `GET /api/cards?childId=` returns shared defaults and the child's custom cards grouped by category. Hidden cards are excluded unless `includeHidden=true`.
+- `POST /api/cards` accepts `{ "childId": 1, "label": "Break", "category": "Activities", "icon": "⭐" }`.
+- `PATCH /api/cards/:id` accepts `{ "hidden": true }`; `DELETE /api/cards/:id` deletes an owned custom card.
+- `GET /api/settings` returns defaults or the authenticated user's settings; `PUT /api/settings` updates them.
+- `GET /api/auth/me` returns the current profile; `PATCH /api/auth/me` updates only its name.
+
+Custom cards and settings use parameterized MySQL access. The card schema includes an `is_hidden` flag; re-run `npm run db:schema` after updating an existing local database. Unit tests inject in-memory repositories; the dedicated integration test covers MySQL route persistence.
 
 ### Adding features
 

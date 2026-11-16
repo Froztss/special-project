@@ -1,8 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -20,6 +22,7 @@ const missingConfig = Object.entries(databaseConfig)
   .filter(([, value]) => value === undefined)
   .map(([key]) => `DB_TEST_${key.toUpperCase()}`);
 const enabled = missingConfig.length === 0;
+const jwtSecret = randomBytes(32).toString('hex');
 
 if (enabled) {
   if (!databaseConfig.name?.toLowerCase().endsWith('_test')) {
@@ -36,8 +39,20 @@ if (enabled) {
 }
 
 const userIds = [1, 2] as const;
-const alice = { Authorization: 'Bearer 1' };
-const bob = { Authorization: 'Bearer 2' };
+const alice = {
+  Authorization: `Bearer ${jwt.sign({}, jwtSecret, {
+    algorithm: 'HS256',
+    subject: '1',
+    expiresIn: '1h',
+  })}`,
+};
+const bob = {
+  Authorization: `Bearer ${jwt.sign({}, jwtSecret, {
+    algorithm: 'HS256',
+    subject: '2',
+    expiresIn: '1h',
+  })}`,
+};
 let activityId: number | undefined;
 let defaultCardId: number | undefined;
 let fixtureCreated = false;
@@ -68,7 +83,7 @@ async function startApi(): Promise<void> {
   let output = '';
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/server.ts'], {
     cwd: fileURLToPath(new URL('../..', import.meta.url)),
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, JWT_SECRET: jwtSecret, PORT: String(port) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   apiProcess = child;

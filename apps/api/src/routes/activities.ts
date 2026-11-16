@@ -1,14 +1,19 @@
 import { Router } from 'express';
+import type { UserRepository } from '../users/userRepository.js';
 import { asyncHandler } from '../lib/errors.js';
-import { requireAuth } from '../mocks/auth.js';
+import { requireAuth } from '../middleware/requireAuth.js';
 import { listActivities } from '../db/feature-data.js';
 
-export const activitiesRouter = Router();
-activitiesRouter.use(requireAuth);
+export function activitiesRouter(users: UserRepository): Router {
+  const router = Router();
+  router.use(requireAuth(users));
 
-activitiesRouter.get(
-  '/',
-  asyncHandler(async (_req, res) => {
-    res.json(await listActivities());
-  }),
-);
+  router.get(
+    '/',
+    asyncHandler(async (_req, res) => {
+      res.json(await listActivities());
+    }),
+  );
+
+  return router;
+}

@@ -1,0 +1,15 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Approved sun/check shape &#194;&#183; editable trace" clip-path="url(#clip0_0_54)">
+<path id="Vector" d="M60 0H20C8.9543 0 0 8.9543 0 20V60C0 71.0457 8.9543 80 20 80H60C71.0457 80 80 71.0457 80 60V20C80 8.9543 71.0457 0 60 0Z" fill="#1F5FAB"/>
+<g id="Group">
+<path id="Vector_2" d="M40 11.75V17.5M40 62.5V68.25M11.75 40H17.5M62.5 40H68.25M20 20L24.625 24.625M55.375 55.375L60 60M20 60L24.625 55.375M55.375 24.625L60 20" stroke-width="6.5" stroke-linecap="round" stroke="#F5A623"/>
+</g>
+<path id="Vector_3" d="M40 54.125C47.801 54.125 54.125 47.801 54.125 40C54.125 32.199 47.801 25.875 40 25.875C32.199 25.875 25.875 32.199 25.875 40C25.875 47.801 32.199 54.125 40 54.125Z" fill="#F5A623"/>
+<path id="Vector_4" d="M33.375 40.25L37.875 44.75L46 35.25" stroke-width="4.375" stroke-linecap="round" stroke-linejoin="round" stroke="#1F5FAB"/>
+</g>
+<defs>
+<clipPath id="clip0_0_54">
+<rect width="80" height="80" fill="white"/>
+</clipPath>
+</defs>
+</svg>
