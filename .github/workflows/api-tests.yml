@@ -26,11 +26,6 @@ jobs:
           --health-retries=12
 
     env:
-      DB_HOST: 127.0.0.1
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: rootpassword
-      DB_NAME: special_project_test
       JWT_SECRET: test-secret-test-secret-123
       FRONTEND_ORIGIN: http://localhost:5173
 
@@ -47,5 +42,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run API tests
-        run: npm test -w @starter/api
+      - name: Run API unit tests
+        run: >-
+          npm test -w @starter/api --
+          --exclude tests/group1/db.test.ts
+          --exclude tests/group1/schema.test.ts
+          --exclude tests/group1/seed.test.ts
+          --exclude tests/group2/user-repository.test.ts
+
+      - name: Run MySQL-backed tests
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: rootpassword
+          DB_NAME: special_project_test
+        run: >-
+          npm test -w @starter/api --
+          tests/group1/db.test.ts
+          tests/group1/schema.test.ts
+          tests/group1/seed.test.ts
+          tests/group2/user-repository.test.ts
