@@ -212,7 +212,7 @@ The following are out of scope for this release:
 | FR-COMM-02 | The system shall provide predefined cards grouped into categories, at minimum Food, Emotions, Activities and Needs (e.g., water, milk, rice, bread, happy, sad, tired, play, toilet, TV). | Must |
 | FR-COMM-03 | When a card is tapped, the system shall speak its label aloud using text-to-speech. | Must |
 | FR-COMM-04 | The system shall let the child build a short phrase in a sentence bar (e.g., "I want" + card) and speak the whole phrase with one button. | Should |
-| FR-COMM-05 | The system shall let the child clear the sentence bar. | Should |
+| FR-COMM-05 | The system shall let the child clear the sentence bar. | Should |azaz
 | FR-COMM-06 | The system shall let Staff add a card by entering a word to speak, choosing a category and choosing an icon from a predefined set. | Should |
 | FR-COMM-07 | The system shall let Staff hide or delete cards they added. | Should |
 | FR-COMM-08 | The system shall let Staff set the TTS voice speed. | Could |

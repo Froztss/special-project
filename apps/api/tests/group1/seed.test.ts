@@ -16,6 +16,17 @@ async function count(table: string, where = ''): Promise<number> {
   return Number(rows[0]?.n);
 }
 
+interface SeededTaskRow extends RowDataPacket {
+  id: number;
+  activity_id: number;
+  name: string;
+  icon: string;
+  start_time: string;
+  duration_min: number;
+  status: string;
+  completed_at: string | null;
+}
+
 describe('1.3 seed script', () => {
   it('seeds the activity library with icons and categories', async () => {
     runSeed();
@@ -52,14 +63,69 @@ describe('1.3 seed script', () => {
     expect(tasks.length).toBe(15);
   });
 
-  it('is idempotent across repeated runs', async () => {
+  it('preserves task edits and completion across repeated runs', async () => {
     runSeed();
+
+    const [seededTasks] = await getDatabasePool().query<SeededTaskRow[]>(
+      `SELECT tasks.id, tasks.activity_id, tasks.name, tasks.icon,
+              TIME_FORMAT(tasks.start_time, '%H:%i:%s') AS start_time,
+              tasks.duration_min, tasks.status,
+              DATE_FORMAT(tasks.completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at
+       FROM tasks
+       JOIN schedules ON schedules.id = tasks.schedule_id
+       JOIN children ON children.id = schedules.child_id
+       JOIN users ON users.id = children.user_id
+       WHERE users.email = ? AND children.name = ? AND schedules.schedule_date = CURRENT_DATE()
+         AND tasks.position = 1`,
+      ['demo@special-project.invalid', 'Avery'],
+    );
+    const task = seededTasks[0];
+    if (!task) {
+      throw new Error('Expected the seeded Avery task to exist.');
+    }
+
+    const [activities] = await getDatabasePool().query<Array<RowDataPacket & { id: number }>>(
+      'SELECT id FROM activities WHERE name = ?',
+      ['Play'],
+    );
+    const alternateActivity = activities[0];
+    if (!alternateActivity) {
+      throw new Error('Expected the seeded Play activity to exist.');
+    }
+
+    await getDatabasePool().execute(
+      `UPDATE tasks
+       SET activity_id = ?, name = ?, icon = ?, start_time = ?, duration_min = ?,
+           status = 'done', completed_at = ?
+       WHERE id = ?`,
+      [alternateActivity.id, 'User-edited task', '⭐', '09:17:00', 42, '2026-03-04 12:34:56', task.id],
+    );
     runSeed();
+
     expect(await count('activities')).toBe(11);
     expect(await count('picture_cards', 'WHERE child_id IS NULL')).toBe(10);
     expect(await count('users')).toBe(1);
     expect(await count('children')).toBe(3);
     expect(await count('schedules')).toBe(3);
     expect(await count('tasks')).toBe(15);
+
+    const [preservedTasks] = await getDatabasePool().query<SeededTaskRow[]>(
+      `SELECT id, activity_id, name, icon,
+              TIME_FORMAT(start_time, '%H:%i:%s') AS start_time,
+              duration_min, status,
+              DATE_FORMAT(completed_at, '%Y-%m-%d %H:%i:%s') AS completed_at
+       FROM tasks
+       WHERE id = ?`,
+      [task.id],
+    );
+    expect(preservedTasks[0]).toMatchObject({
+      activity_id: alternateActivity.id,
+      name: 'User-edited task',
+      icon: '⭐',
+      start_time: '09:17:00',
+      duration_min: 42,
+      status: 'done',
+      completed_at: '2026-03-04 12:34:56',
+    });
   });
 });

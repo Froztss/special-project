@@ -161,14 +161,7 @@ async function seedData(): Promise<void> {
                schedule_id, activity_id, name, icon, start_time, duration_min, position
              )
              SELECT ?, id, name, icon, ?, ?, ? FROM activities WHERE id = ?
-             ON DUPLICATE KEY UPDATE
-               activity_id = VALUES(activity_id),
-               name = VALUES(name),
-               icon = VALUES(icon),
-               start_time = VALUES(start_time),
-               duration_min = VALUES(duration_min),
-               status = 'pending',
-               completed_at = NULL`,
+               ON DUPLICATE KEY UPDATE id = tasks.id`,
             [scheduleId, task.startTime, task.duration, index + 1, activityId],
           );
         }

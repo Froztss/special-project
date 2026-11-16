@@ -83,6 +83,8 @@ The seed-only demo caregiver has no login password; create a normal account to u
 - `npm start`: run the compiled API after building.
 - `npm run preview -w @starter/web`: preview the frontend build locally (no development API proxy).
 
+Rerunning the seed adds missing sample records without overwriting existing task edits or completion state.
+
 ## Extend the template
 
 ### Child profiles, activity library, schedules, tasks, and progress (temporary mocks)
